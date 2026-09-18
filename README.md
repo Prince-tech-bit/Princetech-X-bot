@@ -1,11 +1,3 @@
-<p align="center">
-  <img src="./logo.jpg" alt="PRINCETECH-X BOT" width="300">
-</p>
-<p align="center">
-  <img src="./logo.jpg" width="500" alt="PRINCETECH-X BOT">
-</p>
-
-<h1 align="center">🐺 PRINCETECH-X BOT</h1>
 
 <p align="center">
   <strong>WhatsApp Automation Bot by PRINCETECH</strong>
