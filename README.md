@@ -30,7 +30,7 @@
 - 🐳 Docker support
 - ☁️ Heroku configuration
 
-> **Note:** The 800-command catalog is a command framework/catalog. It does not mean that all 800 entries are fully implemented features.
+> **Note:** The 800-command catalog is a command framework/catalog. It most work mean that all 800 entries are fully implemented features.
 
 ---
 
