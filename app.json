@@ -1,0 +1,15 @@
+{
+  "name": "PRINCETECH-X-BOT",
+  "description": "Princetech-X Bot - WhatsApp automation with rate limiting and SQLite audit logging.",
+  "repository": "https://github.com/your-account/princetech-x-bot",
+  "stack": "heroku-24",
+  "scripts": {
+    "start": "npm start"
+  },
+  "env": {
+    "SESSION_ID": {
+      "description": "Optional legacy session variable; never publish or share its value.",
+      "required": false
+    }
+  }
+}

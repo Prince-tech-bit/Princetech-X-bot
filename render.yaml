@@ -1,0 +1,17 @@
+services:
+  - type: worker
+    name: princetech-x-bot
+    env: docker
+    region: frankfurt
+    plan: free
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: BOT_NAME
+        value: "PRINCETECH-X BOT"
+      - key: PREFIX
+        value: "."
+      - key: OWNER_NAME
+        value: "Princetech"
+      - key: OWNER_NUMBER
+        value: ""
