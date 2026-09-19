@@ -1,0 +1,456 @@
+╔═══════════════════════════════════════════════════════════════════════╗
+║          AMANUI BOT - QUICK START (COPY & PASTE EVERYTHING)          ║
+║                                                                       ║
+║  Just run each section one at a time in your VPS terminal             ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 1: SET UP PROJECT FOLDER
+═══════════════════════════════════════════════════════════════════════
+
+mkdir -p ~/amanui-bot
+cd ~/amanui-bot
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 2: CREATE package.json
+═══════════════════════════════════════════════════════════════════════
+
+cat > package.json << 'EOF'
+{
+  "name": "amanui-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot powered by Claude AI",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node bot.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "@anthropic-ai/sdk": "^0.9.2",
+    "body-parser": "^1.20.2"
+  }
+}
+EOF
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 3: INSTALL DEPENDENCIES
+═══════════════════════════════════════════════════════════════════════
+
+npm install
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 4: CREATE .env FILE (Configuration)
+═══════════════════════════════════════════════════════════════════════
+
+⚠️ IMPORTANT: GET YOUR CREDENTIALS FIRST!
+
+1. ANTHROPIC API KEY:
+   - Go to: https://console.anthropic.com
+   - Get your API key
+
+2. WHATSAPP CREDENTIALS:
+   - Go to: https://developers.facebook.com
+   - Get your Phone Number ID and Access Token
+
+Then run this (REPLACE THE VALUES):
+
+cat > .env << 'EOF'
+WHATSAPP_API_TOKEN=PASTE_YOUR_FACEBOOK_TOKEN_HERE
+WHATSAPP_PHONE_ID=PASTE_YOUR_PHONE_ID_HERE
+WEBHOOK_VERIFY_TOKEN=amanui_bot_secret_2024
+ANTHROPIC_API_KEY=PASTE_YOUR_ANTHROPIC_KEY_HERE
+PORT=3000
+EOF
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 5: CREATE bot.js (MAIN BOT CODE)
+═══════════════════════════════════════════════════════════════════════
+
+Copy this ENTIRE command (paste once):
+
+cat > bot.js << 'ENDOFFILE'
+const express = require('express');
+const axios = require('axios');
+const Anthropic = require('@anthropic-ai/sdk');
+require('dotenv').config();
+
+const app = express();
+app.use(express.json());
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const WHATSAPP_TOKEN = process.env.WHATSAPP_API_TOKEN;
+const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
+const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
+const PORT = process.env.PORT || 3000;
+
+const users = {};
+const conversations = {};
+
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token === WEBHOOK_VERIFY_TOKEN) {
+    console.log('✅ Webhook verified!');
+    res.status(200).send(challenge);
+  } else {
+    res.status(403).send('Forbidden');
+  }
+});
+
+app.post('/webhook', async (req, res) => {
+  const body = req.body;
+
+  if (body.object) {
+    if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {
+      const phoneNumberId = body.entry[0].changes[0].value.metadata.phone_number_id;
+      const fromPhoneNumber = body.entry[0].changes[0].value.messages[0].from;
+      const msgBody = body.entry[0].changes[0].value.messages[0].text.body;
+      const messageId = body.entry[0].changes[0].value.messages[0].id;
+
+      console.log(`📱 Message from ${fromPhoneNumber}: ${msgBody}`);
+      await sendTypingIndicator(phoneNumberId, fromPhoneNumber);
+
+      try {
+        const aiResponse = await getAIResponse(fromPhoneNumber, msgBody);
+        await sendMessage(phoneNumberId, fromPhoneNumber, aiResponse);
+        await markAsRead(phoneNumberId, messageId);
+      } catch (error) {
+        console.error('❌ Error:', error);
+        await sendMessage(phoneNumberId, fromPhoneNumber, '⚠️ Sorry, error occurred. Try again.');
+      }
+
+      res.status(200).send('MESSAGE_RECEIVED');
+    } else {
+      res.status(200).send('EVENT_RECEIVED');
+    }
+  } else {
+    res.status(404).send('Not found');
+  }
+});
+
+async function getAIResponse(userPhone, userMessage) {
+  if (!conversations[userPhone]) {
+    conversations[userPhone] = [];
+    users[userPhone] = { name: 'Friend', joinedAt: new Date(), messageCount: 0 };
+  }
+
+  conversations[userPhone].push({ role: 'user', content: userMessage });
+  const recentMessages = conversations[userPhone].slice(-10);
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-opus-4-1',
+      max_tokens: 1000,
+      system: `You are Amanui, an AI assistant on WhatsApp helping solve problems and answer questions. Be friendly, concise, and helpful. Keep responses under 1000 characters.`,
+      messages: recentMessages
+    });
+
+    const assistantMessage = response.content[0].text;
+    conversations[userPhone].push({ role: 'assistant', content: assistantMessage });
+    users[userPhone].messageCount += 1;
+    return assistantMessage;
+  } catch (error) {
+    console.error('Claude API Error:', error.message);
+    throw error;
+  }
+}
+
+async function sendMessage(phoneNumberId, recipientPhone, message) {
+  const url = `https://graph.instagram.com/v18.0/${phoneNumberId}/messages`;
+
+  try {
+    const messages = splitMessage(message, 1000);
+    for (const msg of messages) {
+      await axios.post(url, {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: recipientPhone,
+        type: 'text',
+        text: { body: msg }
+      }, {
+        headers: {
+          'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      console.log(`✅ Message sent to ${recipientPhone}`);
+    }
+  } catch (error) {
+    console.error('Error sending:', error.response?.data || error.message);
+  }
+}
+
+async function sendTypingIndicator(phoneNumberId, recipientPhone) {
+  const url = `https://graph.instagram.com/v18.0/${phoneNumberId}/messages`;
+  try {
+    await axios.post(url, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: recipientPhone,
+      type: 'typing'
+    }, {
+      headers: {
+        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json'
+      }
+    });
+  } catch (error) {
+    console.error('Typing error:', error);
+  }
+}
+
+async function markAsRead(phoneNumberId, messageId) {
+  const url = `https://graph.instagram.com/v18.0/${phoneNumberId}/messages`;
+  try {
+    await axios.post(url, {
+      messaging_product: 'whatsapp',
+      status: 'read',
+      message_id: messageId
+    }, {
+      headers: {
+        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json'
+      }
+    });
+  } catch (error) {
+    console.error('Read error:', error);
+  }
+}
+
+function splitMessage(text, maxLength) {
+  if (text.length <= maxLength) {
+    return [text];
+  }
+  const messages = [];
+  let currentMessage = '';
+  const sentences = text.split('. ');
+  for (const sentence of sentences) {
+    if ((currentMessage + sentence).length > maxLength) {
+      if (currentMessage) messages.push(currentMessage.trim());
+      currentMessage = sentence;
+    } else {
+      currentMessage += (currentMessage ? '. ' : '') + sentence;
+    }
+  }
+  if (currentMessage) messages.push(currentMessage.trim());
+  return messages;
+}
+
+app.get('/stats/:phone', (req, res) => {
+  const phone = req.params.phone;
+  if (users[phone]) {
+    res.json({
+      user: users[phone],
+      totalMessages: users[phone].messageCount,
+      conversationLength: conversations[phone] ? conversations[phone].length : 0
+    });
+  } else {
+    res.status(404).json({ error: 'User not found' });
+  }
+});
+
+app.get('/users', (req, res) => {
+  res.json(users);
+});
+
+app.delete('/conversations/:phone', (req, res) => {
+  if (conversations[req.params.phone]) {
+    delete conversations[req.params.phone];
+    res.json({ message: 'Conversation cleared' });
+  } else {
+    res.status(404).json({ error: 'Conversation not found' });
+  }
+});
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'running',
+    bot: 'Amanui WhatsApp Bot',
+    users: Object.keys(users).length,
+    uptime: process.uptime()
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`
+╔════════════════════════════════════════╗
+║  🤖 AMANUI WHATSAPP BOT - LIVE 🤖    ║
+║  ✅ Running on port ${PORT}              ║
+║  ✅ Powered by Claude AI               ║
+║  ✅ Ready to receive messages!         ║
+╚════════════════════════════════════════╝
+  `);
+});
+
+process.on('SIGINT', () => {
+  console.log('\n🛑 Shutting down...');
+  process.exit(0);
+});
+ENDOFFILE
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 6: VERIFY FILES WERE CREATED
+═══════════════════════════════════════════════════════════════════════
+
+ls -la
+
+You should see:
+- bot.js
+- package.json
+- .env
+- node_modules/ (folder)
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 7: START THE BOT!
+═══════════════════════════════════════════════════════════════════════
+
+npm start
+
+If you see this, YOU'RE GOOD:
+╔════════════════════════════════════════╗
+║  🤖 AMANUI WHATSAPP BOT - LIVE 🤖    ║
+║  ✅ Running on port 3000               ║
+║  ✅ Powered by Claude AI               ║
+║  ✅ Ready to receive messages!         ║
+╚════════════════════════════════════════╝
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 8: KEEP BOT RUNNING IN BACKGROUND (IMPORTANT!)
+═══════════════════════════════════════════════════════════════════════
+
+Stop current bot with: Ctrl+C
+
+Then run ONE of these:
+
+OPTION A - PM2 (Best):
+npm install -g pm2
+pm2 start bot.js --name "amanui-bot"
+pm2 save
+pm2 startup
+
+OPTION B - nohup:
+nohup npm start > bot.log 2>&1 &
+
+OPTION C - screen:
+screen -S amanui-bot
+npm start
+(Press Ctrl+A then D to detach)
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 9: TEST IF WORKING
+═══════════════════════════════════════════════════════════════════════
+
+In your browser, go to:
+http://your-vps-ip:3000/health
+
+Should see:
+{
+  "status": "running",
+  "bot": "Amanui WhatsApp Bot",
+  "users": 0,
+  "uptime": 123.45
+}
+
+
+═══════════════════════════════════════════════════════════════════════
+SECTION 10: CONNECT TO FACEBOOK WEBHOOK
+═══════════════════════════════════════════════════════════════════════
+
+In Facebook Developers Dashboard:
+
+1. Go to your App
+2. Navigate to Configuration
+3. In Webhooks section click "Verify and Save"
+4. Set URL: https://your-vps-domain/webhook
+5. Verify Token: amanui_bot_secret_2024
+6. Subscribe to: messages, message_status
+
+✅ DONE! Your bot is now live!
+
+
+═══════════════════════════════════════════════════════════════════════
+TEST THE BOT ON WHATSAPP
+═══════════════════════════════════════════════════════════════════════
+
+1. Open WhatsApp
+2. Message your bot number
+3. Bot responds with AI-powered replies!
+
+Try:
+- "Hello Amanui"
+- "What is 2+2?"
+- "Tell me a joke"
+- "Help me with coding"
+
+
+═══════════════════════════════════════════════════════════════════════
+USEFUL COMMANDS
+═══════════════════════════════════════════════════════════════════════
+
+Check if running:
+curl http://your-vps-ip:3000/health
+
+View all users:
+curl http://your-vps-ip:3000/users
+
+Get user stats:
+curl http://your-vps-ip:3000/stats/237677097064
+
+Clear a user's conversation:
+curl -X DELETE http://your-vps-ip:3000/conversations/237677097064
+
+View logs:
+tail -f bot.log
+
+Stop bot (if using nohup):
+pkill -f "npm start"
+
+Restart bot (if using PM2):
+pm2 restart amanui-bot
+
+
+═══════════════════════════════════════════════════════════════════════
+TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════
+
+❌ "Cannot find module"
+→ npm install
+
+❌ "Port 3000 already in use"
+→ Change PORT in .env or: lsof -ti:3000 | xargs kill -9
+
+❌ "API key invalid"
+→ Check your .env file has correct credentials
+
+❌ "Webhook won't verify"
+→ Make sure your VPS IP/domain is publicly accessible
+→ Use ngrok if needed: ngrok http 3000
+
+❌ "Bot not responding"
+→ Check health: curl http://your-vps-ip:3000/health
+→ Check logs: tail -f bot.log
+→ Verify ANTHROPIC_API_KEY in .env
+
+
+═══════════════════════════════════════════════════════════════════════
+DONE! 🎉
+═══════════════════════════════════════════════════════════════════════
+
+Your Amanui WhatsApp Bot is now LIVE!
+It's like ChatGPT on WhatsApp, powered by Claude AI.
+It can help solve problems, answer questions, and have conversations.
