@@ -1,6 +1,6 @@
 {
   "name": "princetech-x-bot",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "description": "Princetech-X Bot \u2014 a privacy-conscious WhatsApp automation bot with rate limiting and SQLite logging.",
   "main": "index.js",
   "type": "commonjs",
